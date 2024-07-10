@@ -381,7 +381,34 @@ graph TD
 
 ------------------------------------------------------------------------
 
-## Demo
+::: panel-tabset
+
+## My Benchmarks
+
+Using the High Volume For-Hire Vehicle Trip Records from NYC’s Taxi data comprising two months of data and totaling 6.5 GB of CSV files with approximately 40 million records, processing time for the following example query took a mere 0.2 seconds (M1 Macbook Air) with peak memory usage of ~ 700 Mb
+
+## Query Time
+``` {r, echo=TRUE}
+ds <- open_dataset('fh_tripdata') # this happens instantly, as it is just a pointer, no actual data loading is taking place.
+system.time({
+ ds %>% 
+ mutate(hour_of_day = hour(request_datetime)) %>% 
+ group_by(hour_of_day) %>% 
+ summarise(num_trips= n()) %>% 
+ arrange(desc(num_trips)) %>% 
+ collect() %>% print()
+})
+```
+1 18 2397880
+ 2 17 2323553
+ 3 19 2319856
+ 4 20 2257895
+ 
+# 20 more rows.  
+ user system elapsed    
+ 0.738 0.100 0.226
+
+:::
 
 ------------------------------------------------------------------------
 

@@ -10,6 +10,8 @@ format:
     code-line-numbers: true
     mermaid: 
       theme: neutral
+execute: 
+  eval: false
 ---
 
 ## Introduction
@@ -409,7 +411,6 @@ system.time({
  0.738 0.100 0.226
 
 :::
-
 ------------------------------------------------------------------------
 
 ## Best Practices

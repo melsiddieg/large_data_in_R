@@ -1,0 +1,411 @@
+---
+title: "Efficient Techniques for Large Data Handling in R"
+format:
+  revealjs:
+    theme: simple
+    css: styles.css
+    transition: slide
+    slide-number: true
+    code-fold: false
+    code-line-numbers: true
+    mermaid: 
+      theme: neutral
+---
+
+## Introduction
+
+-   R faces challenges with big data analysis
+-   Modern solutions leverage efficient file formats and techniques
+-   Focus on partitioning, streaming, and memory optimization
+
+------------------------------------------------------------------------
+
+## Efficient File Formats and Partitioning
+
+::: panel-tabset
+## Concepts
+
+-   **Parquet**: Columnar storage format with excellent compression
+-   **Partitioning**:
+    -   Divides data into smaller, manageable chunks
+    -   Enables parallel processing and efficient querying
+    -   Commonly used with Parquet in data lakes
+
+## Benefits
+
+-   Improved query performance
+-   Efficient data skipping
+-   Better parallelization
+-   Easier data management and updates
+:::
+
+------------------------------------------------------------------------
+
+## Converting CSV to Partitioned Parquet
+
+::: panel-tabset
+## Explanation
+
+-   Use Arrow to convert large CSV files to partitioned Parquet
+-   Partition by relevant columns (e.g., year and month)
+-   Creates a directory structure: /year=YYYY/month=MM/data.parquet
+
+## Code
+
+``` {.r code-line-numbers="1-2|4-5|7-11"}
+library(arrow)
+library(dplyr)
+
+# Read CSV file
+csv_dataset <- open_dataset("large_dataset.csv", format = "csv")
+
+# Define partitioning schema and write to partitioned Parquet
+write_dataset(csv_dataset, 
+              "partitioned_dataset",
+              format = "parquet",
+              partitioning = schema(year = int32(), month = int32()))
+```
+:::
+
+------------------------------------------------------------------------
+
+## Reading Partitioned Parquet Files
+
+::: panel-tabset
+## Concepts
+
+-   Automatically leverages partitioning for efficient data skipping
+-   Combines partition pruning with predicate pushdown
+-   Significantly reduces I/O and processing time
+
+## Code
+
+``` {.r code-line-numbers="4|6-9"}
+library(arrow)
+
+# Open partitioned dataset
+dataset <- open_dataset("partitioned_dataset", format = "parquet")
+
+# Efficient querying with partition and predicate pushdown
+result <- dataset %>%
+  filter(year == 2023, month == 6) %>%
+  select(col1, col2) %>%
+  collect()
+```
+:::
+
+------------------------------------------------------------------------
+
+## History: Arrow, Duckdb and R
+
+::: panel-tabset
+## Arrow
+
+-   2015: Apache Arrow project started
+-   2016: Feather format developed (R and Python collaboration)
+-   2017: Arrow 0.1.0 released
+-   Ongoing: Continuous development and growing ecosystem
+
+## Duckdb
+
+-   Modern continuation of MonetDB
+-   2019: DuckDB project started at CWI
+-   Inspired by converstation with members of R core group
+-   Open-source fast growing project
+:::
+
+------------------------------------------------------------------------
+
+## Arrow: Streaming and Memory Optimization
+
+::: panel-tabset
+## Features
+
+-   Processes data in chunks to reduce memory usage
+-   Automatic determination of optimal chunk sizes
+-   Supports streaming operations for large datasets
+
+## Code
+
+``` {.r code-line-numbers="3|10-15|17-18"}
+library(arrow)
+# Open dataset with specified chunk size
+ds <- open_dataset("large_dataset.parquet", format = "parquet")
+# Model has been fitted using sampled data
+model <- lm(tip_pct ~ total_amount + passenger_count, data = sampled_data)
+# Stream processing with `map_batches` to calculate MSE from whole dataset
+ds %>%
+  select(tip_amount, total_amount, passenger_count) %>%
+  mutate(tip_pct = tip_amount / total_amount) %>%
+  map_batches(function(batch) {
+    batch %>%
+      as.data.frame() %>%
+      mutate(pred_tip_pct = predict(model, newdata = .)) %>%
+      summarize(sse_partial = sum((pred_tip_pct - tip_pct)^2), n_partial = n()) %>%
+      as_record_batch()
+  }) %>%
+  summarize(mse = sum(sse_partial) / sum(n_partial)) %>%
+  pull(mse)
+```
+:::
+
+------------------------------------------------------------------------
+
+## Polars: Streaming and Memory Optimization
+
+::: panel-tabset
+## Features
+
+-   blazing fast rust library for data analysis
+-   Lazy evaluation for optimized query planning
+-   Streaming execution to reduce memory footprint
+-   Efficient handling of large datasets
+
+## Code
+
+``` {.r code-line-numbers="4|6-11|11"}
+library(polars)
+
+# Create a lazy DataFrame with streaming enabled
+lazy_df <- pl$scan_csv("large_dataset.csv")
+
+# Define operations
+result <- lazy_df$
+  select(pl$col("col1"), pl$col("col2"))$
+  filter(pl$col("col1") > 100)$
+  group_by("col2")$
+  agg(pl$col("col1")$mean())$
+  collect(streaming = TRUE)
+```
+
+-   `collect(streaming = TRUE)`: Enables streaming execution
+:::
+
+------------------------------------------------------------------------
+
+## Memory Hierarchy and DuckDB's Efficiency
+
+1.  **Vectorized Execution**: Processes data in small batches that fit in CPU cache
+2.  **Columnar Storage**: Enables efficient data access and compression
+3.  **Adaptive Algorithm Selection**: Chooses optimal algorithms based on data size and available memory
+4.  **Out-of-Core Processing**: Efficiently manages data between disk and memory
+5.  **Memory-Mapped I/O**: Allows direct access to file-backed memory
+
+DuckDB optimizes for the entire memory hierarchy, balancing speed and capacity constraints
+
+------------------------------------------------------------------------
+
+## DuckDB: Efficient Querying of Partitioned Data
+
+::: panel-tabset
+## Features
+
+-   Automatically detects and utilizes Hive-style partitioning
+-   Combines partition pruning with efficient query engine
+-   Optimizes queries for the memory hierarchy
+-   you can set a memory limit, e.g 2GB
+
+## Code
+
+``` {.r code-line-numbers="4|5-8|10"}
+library(duckdb)
+library(dplyr)
+
+con <- dbConnect(duckdb())
+result <- tbl(con, "large_data/*.parquet") %>%
+  filter(year == 2023, month == 6) %>%
+  select(col1, col2) %>%
+  collect()
+
+dbDisconnect(con, shutdown = TRUE)
+```
+:::
+
+------------------------------------------------------------------------
+
+## Order of Operations and Performance
+
+::: panel-tabset
+## Concept
+
+-   Order of operations can significantly impact performance
+-   Key operations: filtering, grouping, aggregation, joining
+-   Different frameworks handle operations differently
+
+## dplyr (Eager)
+
+``` r
+# Less efficient
+df %>%
+  group_by(category) %>%
+  filter(value > 100) %>%
+  summarise(mean_value = mean(value))
+
+# More efficient
+df %>%
+  filter(value > 100) %>%
+  group_by(category) %>%
+  summarise(mean_value = mean(value))
+```
+
+-   dplyr executes operations in the order they're written
+-   Filtering before grouping is usually more efficient
+
+## Polars (Eager)
+
+``` r
+# Polars eager execution
+df$filter(pl$col("value") > 100)$
+  group_by("category")$
+  agg(pl$col("value")$mean()$alias("mean_value"))
+```
+
+-   Polars eager mode optimizes some operations automatically
+-   Still benefits from careful ordering of operations
+
+## Polars (Lazy)
+
+``` r
+# Polars lazy execution
+df$lazy()$
+  filter(pl$col("value") > 100)$
+  group_by("category")$
+  agg(pl$col("value")$mean()$alias("mean_value"))$
+  collect()
+```
+
+-   Lazy evaluation allows Polars to optimize the entire query plan
+-   Less sensitive to the order of operations in the code
+:::
+
+------------------------------------------------------------------------
+
+## Summary: Arrow, Polars, and DuckDB Techniques
+
+```{mermaid}
+graph TD
+    A[Large Dataset]
+    B[Arrow]
+    C[Polars]
+    D[DuckDB]
+    
+    A --> B
+    A --> C
+    A --> D
+    
+    B & C & D --> E[Columnar Format]
+    B & C & D --> F[Predicate Pushdown]
+    B & C & D --> G[Vectorized Operations]
+    
+    B & C --> H[Streaming Execution]
+    
+    B --> B1[Memory Mapping]
+    B --> B2[SIMD Operations]
+    
+    C --> C1[Lazy Evaluation]
+    C --> C2[Query Optimization]
+    
+    D --> D1[Adaptive Algorithms]
+    D --> D2[Out-of-Core Processing]
+    D --> D3[SQL Engine]
+    
+    style A fill:#f9d5e5,stroke:#333,stroke-width:2px
+    style B fill:#eeac99,stroke:#333,stroke-width:2px
+    style C fill:#b5e7a0,stroke:#333,stroke-width:2px
+    style D fill:#86af49,stroke:#333,stroke-width:2px
+    
+    classDef shared fill:#ffd700,stroke:#333,stroke-width:1px
+    classDef unique fill:#f0f0f0,stroke:#333,stroke-width:1px
+    class E,F,G,H shared
+    class B1,B2,C1,C2,D1,D2,D3 unique
+```
+
+::: callout-note
+## Key Takeaways
+
+-   **Shared Techniques**: All three tools leverage columnar formats, predicate pushdown, and vectorized operations.
+-   **Partial Overlap**: Arrow and Polars both support streaming execution.
+-   **Unique Strengths**:
+    -   Arrow: Memory mapping and SIMD operations
+    -   Polars: Lazy evaluation and query optimization
+    -   DuckDB: Adaptive algorithms, out-of-core processing, and SQL engine
+-   Each tool offers efficient solutions for large data handling, with some specialized features for specific use cases.
+:::
+
+------------------------------------------------------------------------
+
+## Future Developments
+
+::: panel-tabset
+## Arrow in DBI
+
+-   Arrow is being integrated into the DBI (Database Interface) ecosystem
+-   This will allow Arrow to be used as a backend for database connections
+-   Benefits:
+    -   Improved performance for data transfer between R and databases
+    -   Seamless integration with existing DBI-compliant code
+
+## duckplyr Package
+
+-   duckplyr: A new package combining dplyr syntax with DuckDB's performance
+-   Aims to provide a drop-in replacement for dplyr operations
+-   Features:
+    -   Automatic translation of dplyr operations to DuckDB queries
+    -   Significant performance improvements for large datasets
+    -   Seamless integration with existing dplyr-based workflows
+:::
+
+------------------------------------------------------------------------
+
+## Comparison: Polars, Arrow, and DuckDB
+
+| Feature                 | Polars | Arrow   | DuckDB |
+|-------------------------|--------|---------|--------|
+| Partitioning Support    | ✓      | ✓       | ✓      |
+| Streaming Processing    | ✓      | ✓       | ✓      |
+| Memory Optimization     | ✓      | ✓       | ✓      |
+| Automatic Chunking      | ✓      | ✓ (exp) | ✓      |
+| SQL Support             | ✗      | ✗       | ✓      |
+| Native R Implementation | ✗      | ✓       | ✗      |
+
+-   All three provide advanced features for efficient large data handling
+-   Choice depends on specific use case and required features
+
+------------------------------------------------------------------------
+
+## Benchmarks
+
+```{=html}
+<iframe src="https://duckdblabs.github.io/db-benchmark/" width="100%" height="80%" frameborder="0"></iframe>
+```
+
+------------------------------------------------------------------------
+
+## Demo
+
+------------------------------------------------------------------------
+
+## Best Practices
+
+1.  Use partitioned Parquet for large datasets
+2.  Leverage streaming capabilities to reduce memory footprint
+3.  Utilize automatic chunking and batch processing when available
+4.  Choose partitioning schemes that align with common query patterns
+5.  Benchmark different approaches for your specific use case\
+6.  Be mindful of order of operations
+
+------------------------------------------------------------------------
+
+## Conclusions
+
+-   Partitioning is crucial for efficient big data handling
+-   Streaming and memory optimization techniques enable processing of very large datasets
+-   Modern R packages (Polars, Arrow, DuckDB) offer advanced features for large data
+-   Efficient data handling is key to productive big data analysis in R
+-   Future developments promise even better integration and performance
+
+------------------------------------------------------------------------
+
+## Thank You!
+
+Questions? Comments?
